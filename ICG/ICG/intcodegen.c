@@ -13,6 +13,16 @@ int getIDOffset(SymbolTablePtr st_head, char* id) {
     return -1;
 }
 
+// void printST(SymbolTablePtr st_head) {
+//     SymbolTablePtr temp = st_head;
+//     while(temp!=NULL) {
+//         printf("\tName: %s, Offset: %d;\n", temp->name, temp->offset);
+//         temp = temp->next;
+//     }
+//     return;
+// }
+
+// finds the first available register
 int getAvailableReg() {
     for(int i=2; i<=11; i++) {
         if(isRegInUse[i] == 0) {
@@ -22,15 +32,7 @@ int getAvailableReg() {
     return -1;
 }
 
-void printST(SymbolTablePtr st_head) {
-    SymbolTablePtr temp = st_head;
-    while(temp != NULL) {
-        printf("Name: %s, Offset: %d\n", temp->name, temp->offset);
-        temp = temp->next;
-    }
-    return;
-}
-
+// searches for a particular identifier in the symbol table
 SymbolTablePtr findID(SymbolTablePtr st_head, char* id) {
     SymbolTablePtr temp = st_head;
     while(temp != NULL) {
@@ -42,110 +44,85 @@ SymbolTablePtr findID(SymbolTablePtr st_head, char* id) {
     return NULL;
 }
 
-SymbolTablePtr addIDtoST(SymbolTablePtr st_head, char* id) {
-    SymbolTablePtr temp = st_head;
-    SymbolTablePtr prev = NULL;
-    while(temp != NULL) {
-        prev = temp;
-        temp = temp->next;
-    }
+// adds an identifier to the symbol table
+SymbolTablePtr addIDtoST(SymbolTablePtr* st_head, char* id) {
+    SymbolTablePtr new_node = (SymbolTablePtr)malloc(sizeof(SymbolTable));
+    new_node->name = strdup(id); 
+    new_node->offset = offset++;
+    new_node->next = NULL;
 
-    temp = (SymbolTablePtr)malloc(sizeof(SymbolTable));
-    temp->name = strdup(id);
-    temp->offset = offset;
-    temp->next = NULL;
-
-    offset++;
-
-    if(st_head == NULL) {
-        return temp;
-    }
+    // If the head is NULL, this is the first node
+    if (*st_head == NULL) {
+        *st_head = new_node;
+    } 
     else {
-        prev->next = temp;
+        SymbolTablePtr temp = *st_head;
+        while(temp->next != NULL) {
+            temp = temp->next;
+        }
+        // Add new node to the end
+        temp->next = new_node;
     }
+    return new_node;
+}
+
+// Function to find an identifier in the symbol table, if not found, add it
+SymbolTablePtr findOrAddID(SymbolTablePtr* st_head, char* id) {
+    SymbolTablePtr temp = findID(*st_head, id);
+    if (!temp) 
+        temp = addIDtoST(st_head, id);
+    return temp;
+}
+
+// Function to fetch a value from a register
+void fetchFromRegister(int fetch_to, int reg) {
+    printf("\tMEM[%d] = R[%d];\n", fetch_to, reg);
+    printf("\tmprn(MEM,%d);\n", fetch_to);
+    isRegInUse[reg] = 0;  // Mark register as free after use
+}
+
+// Function to fetch a value from a memory location
+void fetchToRegister(int fetch_from_addr, int fetch_to_mem, int fetch_to_reg, int isStore) {
+    printf("\tR[%d] = MEM[%d];\n", fetch_to_reg, fetch_from_addr);
+    if(isStore) {
+        fetchFromRegister(fetch_to_mem, 0);
+    }
+}
+
+// Function to set an identifier to a number
+SymbolTablePtr setIDNUM(SymbolTablePtr st_head, char* id, int num) {
+    SymbolTablePtr temp = findOrAddID(&st_head, id);
+    printf("\tMEM[%d] = %d;\n", temp->offset, num);
+    printf("\tmprn(MEM,%d);\n", temp->offset);
     return st_head;
 }
 
-void printFetchesforIDNUM(int fetch_to, int num) {
-    printf("\tMEM[%d] = %d;\n", fetch_to, num);
-    printf("\tmprn(MEM,%d);\n", fetch_to);
-    return;
-}
-
-SymbolTablePtr setIDNUM(SymbolTablePtr st_head, char* id, int num) {
-    SymbolTablePtr temp = findID(st_head, id);
-    if(temp == NULL) {
-        temp = addIDtoST(st_head, id);
-        printFetchesforIDNUM(offset-1, num);
-        return temp;
-    }
-    else {
-        printFetchesforIDNUM(temp->offset, num);
-        return st_head;
-    }
-}
-
-void printFetchesforIDID(int fetched_addr, int fetch_to) {
-    printf("\tR[0] = MEM[%d];\n", fetched_addr);
-    printf("\tMEM[%d] = R[0];\n", fetch_to);
-    printf("\tmprn(MEM,%d);\n", fetch_to);
-    return;
-}
-
+// Function to set an identifier to another identifier
 SymbolTablePtr setIDID(SymbolTablePtr st_head, char* id, char* rid) {
-    int roff = getIDOffset(st_head, rid);
-    if(roff == -1) {
-        printFetchesforIDID(offset, offset-1);
-        offset++;
-        return st_head;
-    }
-    SymbolTablePtr temp = findID(st_head, id);
-    if(temp == NULL) {
-        temp = addIDtoST(st_head, id);
-        printFetchesforIDID(roff, offset-1);
-        return temp;
-    }
-    else {
-        printFetchesforIDID(roff, temp->offset);
-        return st_head;
-    }
+    SymbolTablePtr right_id = findOrAddID(&st_head, rid);
+    SymbolTablePtr temp = findOrAddID(&st_head, id);
+    fetchToRegister(right_id->offset, temp->offset, 0, 1);
+    return st_head;
 }
 
-void printFetchesforIDEXPR(int fetch_to, int fetch_from, int expr_type) {
-    if(expr_type == 0) {
-        printf("\tMEM[%d] = MEM[%d];\n", fetch_to, fetch_from);
-    }
-    else if(expr_type == 2) {
-        printf("\tMEM[%d] = R[%d];\n", fetch_to, fetch_from);
-        isRegInUse[fetch_from] = 0;
-    }
-    printf("\tmprn(MEM,%d);\n", fetch_to);
-    return;
-}
-
+// Function to set an identifier to an expression
 SymbolTablePtr setIDEXPR(SymbolTablePtr st_head, char* id, valueType* expr) {
-    SymbolTablePtr temp = findID(st_head, id);
-    if(temp == NULL) {
-        temp = addIDtoST(st_head, id);
-        printFetchesforIDEXPR(offset-1, expr->value, expr->type);
-        return st_head;
-    }
-    else {
-        printFetchesforIDEXPR(temp->offset, expr->value, expr->type);
-        return st_head;
-    }
+    SymbolTablePtr temp = findOrAddID(&st_head, id);
+    fetchFromRegister(temp->offset, expr->value);
+    return st_head;
 }
 
+// sets the output string value depending on argument type
 void selectArg(valueType* arg, char* s, int argnum) {
     switch (arg->type) {
         case 0:
             if(isRegInUse[0] == 0) {
-                printf("\tR[0] = MEM[%d];\n", arg->value);
+                fetchToRegister(arg->value, -1, 0, 0);
                 sprintf(s, "R[0]");
                 isRegInUse[0] = 1;
             }
             else {
-                printf("\tR[%d] = MEM[%d];\n", argnum - 1, arg->value);
+                fetchToRegister(arg->value, -1, argnum-1, 0);
                 sprintf(s, "R[%d]", argnum - 1);
                 isRegInUse[argnum - 1] = 1;
             }
@@ -162,8 +139,8 @@ void selectArg(valueType* arg, char* s, int argnum) {
     }
 }
 
+// Function that does the required intermediate operations for the given expression
 valueType* encodeEXPR(int op, valueType* arg1, valueType* arg2) {
-
     char s1[15], s2[15];
 
     selectArg(arg1, s1, 1);
@@ -173,13 +150,17 @@ valueType* encodeEXPR(int op, valueType* arg1, valueType* arg2) {
     valueType* temp = (valueType*)malloc(sizeof(valueType));
 
     if(availReg == -1) {
+        char s[15];
+        sprintf(s, "$%d", ++temp_offset);
+        SymbolTablePtr new_node = addIDtoST(&ST_Head, s);
+
         if(op != EXPO) {
             printf("\tR[0] = %s %c %s;\n", s1, (char)op, s2);
-            printf("\tMEM[%d] = R[0];\n", offset++);
+            printf("\tMEM[%d] = R[0];\n", new_node->offset);
         }
         else {
             printf("\tR[0] = pwr(%s,%s);\n", s1, s2);
-            printf("\tMEM[%d] = R[0];\n", offset++);
+            printf("\tMEM[%d] = R[0];\n", new_node->offset);
         }
         temp->type = 0;
         temp->value = offset-1;
@@ -201,6 +182,7 @@ valueType* encodeEXPR(int op, valueType* arg1, valueType* arg2) {
     }
 }
 
+// Function to handle standalone expressions
 void standalone(valueType* expr) {
     if(expr->type == 0) {
         printf("\teprn(MEM,%d);\n", expr->value);
