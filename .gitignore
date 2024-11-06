@@ -1,0 +1,4 @@
+*.out
+lex.yy.c
+*.txt
+.vscode
