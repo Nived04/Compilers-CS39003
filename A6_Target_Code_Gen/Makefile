@@ -4,7 +4,7 @@ all:
 	gcc -g codegen.c
 
 run: all
-	./a.out < sample.txt
+	./a.out < sample.txt > output.txt
 
 clean:
 	rm -f *.out lex.yy.c y.tab.h y.tab.c

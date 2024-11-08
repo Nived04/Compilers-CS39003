@@ -48,13 +48,19 @@ void setID(char*, char*);
 
 void printST();
 
-SymbolTable findID(char*);
-SymbolTable addIDtoST(char*);
-SymbolTable findOrAddID(char*);
+SymbolTable* findID(char*);
+SymbolTable* addIDtoST(char*);
+SymbolTable* findOrAddID(char*);
+
+void print_IntCode();
+
+void emit(char*, char*, char*, char*);
+
+void backpatch(int, int); 
 
 %}
 
-%union {int num; char* text; Symbol* sym;}
+%union {int num; char* text;}
 
 %token LP RP SET WHEN LOOP EQ NOT_EQ LT GT LE GE INVALID_TOKEN
 %token <num> PLUS MINUS MULT DIV MOD
@@ -63,12 +69,12 @@ SymbolTable findOrAddID(char*);
 %start prog
 %type stmt asgn cond loop bool 
 %type <text> atom expr reln
-%type <num> oper M
+%type <num> oper M N
 
 %%
 
 prog: 	
-	  list		{ instruction_count = 1; }
+	  list		{ instruction_count++; }
 	;
 
 list:
@@ -83,24 +89,32 @@ stmt:
 	;
 
 asgn:
-	  LP SET IDEN atom RP			{ ST_Head = setID(ST_Head, $3, $4); emit("=", $4, NULL, $3); }
+	  LP SET IDEN atom RP			
+	  { 
+		setID($3, $4); 
+		emit("=", $4, NULL, $3); 
+	  }
 	;
 
 cond:
-	  LP WHEN bool M list RP		{ backpatch($4, instruction_count+1); }
+	  LP WHEN bool M list RP		{ backpatch($4+2, instruction_count+1); }
 	;
 
 
 loop:
-	  LP LOOP bool M list M RP		{ backpatch($4, instruction_count+1); backpatch($6, $4); }
+	  LP LOOP bool M list N RP		{ backpatch($4+1, instruction_count+1); backpatch($6+2, $4); }
 	;
 
 M:	
-	  { emit("goto", NULL, NULL, NULL); }
+	  { emit("goto", NULL, NULL, NULL); $$=(--instruction_count); }
 	; 
 
+N: 
+	  { emit("goto", NULL, NULL, NULL); $$=instruction_count; }
+	;
+
 expr: 
-	  LP oper atom atom RP		{ emit("=", $3, $4, generateTemp()); }
+	  LP oper atom atom RP		{ $$ = generateTemp(); char s[1] = {(char)$2}; emit(s, $3, $4, $$); }
 	; 
 
 bool:
@@ -108,7 +122,7 @@ bool:
 	;
 
 atom:
-	  IDEN  	{ findorAddID(ST_Head, $1); }
+	  IDEN  	{ findOrAddID($1); }
 	| NUMB		{ $$=$1; }
 	| expr		{ $$=$1; }
 	;
@@ -145,15 +159,15 @@ char* generateTemp() {
 void printST() {
 	SymbolTable* iter = ST_Head;
 	while(iter != NULL) {
-		printf("%s\n", iter->symbol->name);
+		printf("%s\n", iter->name);
 		iter = iter->next;
 	}
 	return;
 }
 
 // searches for a particular identifier in the symbol table
-SymbolTable* findID(SymbolTable* st_head, char* id) {
-    SymbolTable* temp = st_head;
+SymbolTable* findID(char* id) {
+    SymbolTable* temp = ST_Head;
     while(temp != NULL) {
         if( strcmp(temp->name, id) == 0) {
             return temp;
@@ -164,18 +178,17 @@ SymbolTable* findID(SymbolTable* st_head, char* id) {
 }
 
 // adds an identifier to the symbol table
-SymbolTable* addIDtoST(SymbolTable** st_head, char* id) {
+SymbolTable* addIDtoST(char* id) {
     SymbolTable* new_node = (SymbolTable*)malloc(sizeof(SymbolTable));
     new_node->name = strdup(id); 
-    new_node->offset = offset++;
     new_node->next = NULL;
 
     // If the head is NULL, this is the first node
-    if (*st_head == NULL) {
-        *st_head = new_node;
+    if (ST_Head == NULL) {
+        ST_Head = new_node;
     } 
     else {
-        SymbolTable* temp = *st_head;
+        SymbolTable* temp = ST_Head;
         while(temp->next != NULL) {
             temp = temp->next;
         }
@@ -186,17 +199,16 @@ SymbolTable* addIDtoST(SymbolTable** st_head, char* id) {
 }
 
 // Function to find an identifier in the symbol table, if not found, add it
-SymbolTable* findOrAddID(SymbolTable** st_head, char* id) {
-    SymbolTable* temp = findID(*st_head, id);
+SymbolTable* findOrAddID(char* id) {
+    SymbolTable* temp = findID(id);
     if (!temp) 
-        temp = addIDtoST(st_head, id);
+        temp = addIDtoST(id);
     return temp;
 }
 
-SymbolTable* setID(SymbolTable** st_head, char* id, char* rid) {
-    SymbolTable* right_ID = findOrAddID(st_head, rid);
-    SymbolTable* left_ID = findOrAddID(st_head, id);
-    return *st_head;
+void setID(char* id, char* rid) {
+    SymbolTable* right_ID = findOrAddID(rid);
+    SymbolTable* left_ID = findOrAddID(id);
 }
 
 void emit(char* op, char* arg1, char* arg2, char* res) {
@@ -223,6 +235,46 @@ void emit(char* op, char* arg1, char* arg2, char* res) {
 	}
 }
 
-void backpatch(int addr, int val) {
-	
+void backpatch(int from, int target) {
+	quadTable* iter = Q_Head;
+	int inst = 1;
+
+	while(iter != NULL) {
+		if(inst == from) {
+			char buff[10];
+			sprintf(buff, "%d", target);
+			/* printf("** TEST : %d, %s, %d, %s\n", inst, buff, target, iter->quad->op); */
+			iter->quad->res = strdup(buff);
+			return;
+		}
+		iter = iter->next;
+		inst++;
+	}	
+}
+
+void print_IntCode() {
+	quadTable* iter = Q_Head;
+	int inst = 0;
+
+	while(iter != NULL) {
+		inst++;
+		printf("\t%d\t: ", inst);
+		if( strcmp(iter->quad->res, "iffalse") == 0) {
+			printf("%s (%s %s %s) ", iter->quad->res, iter->quad->arg1, iter->quad->op, iter->quad->arg2);
+			iter = iter->next;
+			printf("goto %s\n", iter->quad->res);
+		}
+		else if( strcmp(iter->quad->op, "goto") == 0) {
+			printf("%s %s\n", iter->quad->op, iter->quad->res);
+		}
+		else {
+			if(iter->quad->arg2 == NULL) {
+				printf("%s = %s\n", iter->quad->res, iter->quad->arg1);
+			}
+			else {
+				printf("%s = %s %s %s\n", iter->quad->res, iter->quad->arg1, iter->quad->op, iter->quad->arg2);
+			}
+		}
+		iter = iter->next;
+	}
 }
