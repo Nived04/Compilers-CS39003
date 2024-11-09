@@ -10,6 +10,7 @@ extern int yylineno;
 extern char* yytext;
 
 int temp_gen_count = 0, instruction_count = 0;
+int block_leaders[1000]; // assuming at most 1000 instructions can be given
 char t[5];
 
 typedef struct _SymbolTable {
@@ -22,6 +23,7 @@ typedef struct _SymbolTable {
 }SymbolTable;
 
 typedef struct quadruple {
+	int inst_no;
 	char *op, *arg1, *arg2, *res;
 }quadruple;
 
@@ -54,7 +56,7 @@ SymbolTable* findOrAddID(char*);
 
 void print_IntCode();
 
-void emit(char*, char*, char*, char*);
+void emit(char*, char*, char*, char*, int);
 
 void backpatch(int, int); 
 
@@ -92,39 +94,38 @@ asgn:
 	  LP SET IDEN atom RP			
 	  { 
 		setID($3, $4); 
-		emit("=", $4, NULL, $3); 
+		emit("=", $4, NULL, $3, 1); 
 	  }
 	;
 
 cond:
-	  LP WHEN bool M list RP		{ backpatch($4+2, instruction_count+1); }
+	  LP WHEN bool M list RP		{ backpatch($4, instruction_count+1); }
 	;
 
-
 loop:
-	  LP LOOP bool M list N RP		{ backpatch($4+1, instruction_count+1); backpatch($6+2, $4); }
+	  LP LOOP bool M list N RP		{ backpatch($4, instruction_count+1); backpatch($6, $4); }
 	;
 
 M:	
-	  { emit("goto", NULL, NULL, NULL); $$=(--instruction_count); }
+	  { $$=instruction_count; emit("goto", NULL, NULL, NULL, 0); block_leaders[instruction_count+1] = 1; }
 	; 
 
 N: 
-	  { emit("goto", NULL, NULL, NULL); $$=instruction_count; }
+	  { emit("goto", NULL, NULL, NULL, 1); $$=instruction_count; block_leaders[instruction_count+1] = 1; }
 	;
 
 expr: 
-	  LP oper atom atom RP		{ $$ = generateTemp(); char s[1] = {(char)$2}; emit(s, $3, $4, $$); }
+	  LP oper atom atom RP		{ $$ = generateTemp(); char s[1] = {(char)$2}; emit(s, $3, $4, $$, 1); }
 	; 
 
 bool:
-	  LP reln atom atom RP		{ emit($2, $3, $4, "iffalse"); }
+	  LP reln atom atom RP		{ emit($2, $3, $4, "iffalse", 1); }
 	;
 
 atom:
-	  IDEN  	{ findOrAddID($1); }
-	| NUMB		{ $$=$1; }
-	| expr		{ $$=$1; }
+	  IDEN  	{ findOrAddID($1); $$ = strdup($1); }
+	| NUMB		{ $$=strdup($1); }
+	| expr		{ $$=strdup($1); }
 	;
 
 oper:
@@ -211,11 +212,13 @@ void setID(char* id, char* rid) {
     SymbolTable* left_ID = findOrAddID(id);
 }
 
-void emit(char* op, char* arg1, char* arg2, char* res) {
-	instruction_count++;
+void emit(char* op, char* arg1, char* arg2, char* res, int flag) {
+	if(flag) {
+		instruction_count++;
+	}
 	quadTable* new_quad = (quadTable*)malloc(sizeof(quadTable));
 	new_quad->quad = (quadruple*)malloc(sizeof(quadruple));
-
+	new_quad->quad->inst_no = instruction_count;
 	new_quad->quad->op = (op == NULL) ? NULL : strdup(op);
 	new_quad->quad->arg1 = (arg1 == NULL) ? NULL : strdup(arg1);
 	new_quad->quad->arg2 = (arg2 == NULL) ? NULL : strdup(arg2);
@@ -236,28 +239,31 @@ void emit(char* op, char* arg1, char* arg2, char* res) {
 }
 
 void backpatch(int from, int target) {
+	block_leaders[target] = 1;
 	quadTable* iter = Q_Head;
-	int inst = 1;
-
+	/* printf("from: %d, target: %d\n", from, target); */
 	while(iter != NULL) {
-		if(inst == from) {
-			char buff[10];
-			sprintf(buff, "%d", target);
-			/* printf("** TEST : %d, %s, %d, %s\n", inst, buff, target, iter->quad->op); */
+		char buff[10];
+		sprintf(buff, "%d", target);
+		if((iter->quad->op != NULL) && (strcmp(iter->quad->op, "goto") == 0) && (iter->quad->inst_no == from)) {
+			/* printf("HELLO\n"); */
 			iter->quad->res = strdup(buff);
 			return;
 		}
 		iter = iter->next;
-		inst++;
 	}	
 }
 
 void print_IntCode() {
 	quadTable* iter = Q_Head;
 	int inst = 0;
-
+	int block_count = 1;
+	printf("Block 1\n");
 	while(iter != NULL) {
 		inst++;
+		if(block_leaders[inst] == 1) {
+			printf("\nBlock %d\n", ++block_count);
+		}
 		printf("\t%d\t: ", inst);
 		if( strcmp(iter->quad->res, "iffalse") == 0) {
 			printf("%s (%s %s %s) ", iter->quad->res, iter->quad->arg1, iter->quad->op, iter->quad->arg2);

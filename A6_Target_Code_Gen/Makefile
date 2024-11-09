@@ -7,4 +7,4 @@ run: all
 	./a.out < sample.txt > output.txt
 
 clean:
-	rm -f *.out lex.yy.c y.tab.h y.tab.c
+	rm -f *.out lex.yy.c *.tab.h *.tab.c output.txt
