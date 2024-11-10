@@ -4,13 +4,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MAX_REG 5
+
 int yylex(void);
 void yyerror(char *);
 extern int yylineno;
 extern char* yytext;
 
-int temp_gen_count = 0, instruction_count = 0;
-int block_leaders[1000]; // assuming at most 1000 instructions can be given
+int temp_gen_count = 0, instruction_count = 0, target_inst_count = 0;
+int block_begin[1000]; // assuming at most 1000 instructions can be given
+int block_leaders[1000];
+int target_leaders[1000];
+int inst_to_target[1000];
 char t[5];
 
 typedef struct _SymbolTable {
@@ -19,6 +24,7 @@ typedef struct _SymbolTable {
 	int reg_locs; 
 	int mem_locs;
 	int isInSync;
+	int isLive;
 	struct _SymbolTable* next;
 }SymbolTable;
 
@@ -39,11 +45,14 @@ typedef struct name_list {
 
 typedef struct _register {
 	int score;
-    name_list reg_descriptor;
+    name_list* reg_descriptor;
 }reg;
+
+reg RegBank[MAX_REG];
 
 SymbolTable* ST_Head = NULL;
 quadTable* Q_Head = NULL;
+quadTable* T_Head = NULL;
 
 char* generateTemp();
 void setID(char*, char*);
@@ -107,15 +116,15 @@ loop:
 	;
 
 M:	
-	  { $$=instruction_count; emit("goto", NULL, NULL, NULL, 0); block_leaders[instruction_count+1] = 1; }
+	  { $$=instruction_count; emit("goto", NULL, NULL, NULL, 0); block_begin[instruction_count+1] = 1; }
 	; 
 
 N: 
-	  { emit("goto", NULL, NULL, NULL, 1); $$=instruction_count; block_leaders[instruction_count+1] = 1; }
+	  { emit("goto", NULL, NULL, NULL, 1); $$=instruction_count; block_begin[instruction_count+1] = 1; }
 	;
 
 expr: 
-	  LP oper atom atom RP		{ $$ = generateTemp(); char s[1] = {(char)$2}; emit(s, $3, $4, $$, 1); }
+	  LP oper atom atom RP		{ $$ = generateTemp(); addIDtoST($$); char s[1] = {(char)$2}; emit(s, $3, $4, $$, 1); }
 	; 
 
 bool:
@@ -182,6 +191,10 @@ SymbolTable* findID(char* id) {
 SymbolTable* addIDtoST(char* id) {
     SymbolTable* new_node = (SymbolTable*)malloc(sizeof(SymbolTable));
     new_node->name = strdup(id); 
+	new_node->reg_locs = -1;
+	new_node->mem_locs = -1;
+	new_node->isInSync = 1;
+	new_node->isLive = 1;
     new_node->next = NULL;
 
     // If the head is NULL, this is the first node
@@ -239,7 +252,7 @@ void emit(char* op, char* arg1, char* arg2, char* res, int flag) {
 }
 
 void backpatch(int from, int target) {
-	block_leaders[target] = 1;
+	block_begin[target] = 1;
 	quadTable* iter = Q_Head;
 	/* printf("from: %d, target: %d\n", from, target); */
 	while(iter != NULL) {
@@ -252,35 +265,4 @@ void backpatch(int from, int target) {
 		}
 		iter = iter->next;
 	}	
-}
-
-void print_IntCode() {
-	quadTable* iter = Q_Head;
-	int inst = 0;
-	int block_count = 1;
-	printf("Block 1\n");
-	while(iter != NULL) {
-		inst++;
-		if(block_leaders[inst] == 1) {
-			printf("\nBlock %d\n", ++block_count);
-		}
-		printf("\t%d\t: ", inst);
-		if( strcmp(iter->quad->res, "iffalse") == 0) {
-			printf("%s (%s %s %s) ", iter->quad->res, iter->quad->arg1, iter->quad->op, iter->quad->arg2);
-			iter = iter->next;
-			printf("goto %s\n", iter->quad->res);
-		}
-		else if( strcmp(iter->quad->op, "goto") == 0) {
-			printf("%s %s\n", iter->quad->op, iter->quad->res);
-		}
-		else {
-			if(iter->quad->arg2 == NULL) {
-				printf("%s = %s\n", iter->quad->res, iter->quad->arg1);
-			}
-			else {
-				printf("%s = %s %s %s\n", iter->quad->res, iter->quad->arg1, iter->quad->op, iter->quad->arg2);
-			}
-		}
-		iter = iter->next;
-	}
 }
