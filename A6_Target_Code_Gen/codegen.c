@@ -278,19 +278,25 @@ void convertToTargetCode() {
         if(block_begin[inst] == 1) {
             // free all the registers before starting a new block
             freeRegisters();
+            // a map to keep track of which target code instruction corresponds to the leader instruction of a block
             inst_to_target[inst] = target_inst_count + 1;
         }
 
+        // unconditional jump
         if(iter->quad->op == GOTO) {
             freeRegisters();
             emitTC(JUMP, NULL, NULL, iter->quad->res);
         }
+        // conditional jump
         else if(strcmp(iter->quad->res, "iffalse") == 0) {
             char *tc_arg1, *tc_arg2, tc_op[20];
 
+            // get the target code values of the arguments
             tc_arg1 = tc_arg_value(tc_arg1, iter->quad->arg1, 0);
             tc_arg2 = tc_arg_value(tc_arg2, iter->quad->arg2, 0);
 
+            // if the arguments are temporaries, turn off their live status since this is a conditional statement
+            // hence they are not live after this statement
             kill_temp(iter->quad->arg1);
             kill_temp(iter->quad->arg2);
 
@@ -299,6 +305,7 @@ void convertToTargetCode() {
 
             iter = iter->next;
         }
+        // set statement
         else if(iter->quad->op == EQUATE){
             SymbolTable* sym = findID(iter->quad->res);
 
@@ -327,9 +334,10 @@ void convertToTargetCode() {
 
                 kill_temp(iter->quad->arg1);
             }
+            // since the value is recently updated in the set statment, it is out of sync with the memory
             sym->isInSync = 0;
         }
-        // OP T A B
+        // arithmetic statement
         else {
             char *tc_arg1, *tc_arg2, tc_res[20];
 
@@ -353,6 +361,7 @@ void convertToTargetCode() {
     freeRegisters();
 }
 
+// prints the target code to a file
 void print_TargetCode() {
     quadTable* iter = T_Head;
     int target_inst = 1, block_count = 1;
@@ -361,6 +370,7 @@ void print_TargetCode() {
 
     fprintf(f, "Block %d\n", block_count++);
     while(iter) {
+        // if the instruction is the leader of a block, print the block number
         if(inst_to_target[block_leaders[block_count]] == target_inst) {
             fprintf(f, "\nBlock %d\n", block_count++);
         }
@@ -378,20 +388,25 @@ void print_TargetCode() {
         }
 
         fprintf(f, "\t%d\t: %s ", target_inst, tc_op);
-
-        if(iter->quad->op == JUMP) { // jump type code
+        
+        // jump instruction (unconditional)
+        if(iter->quad->op == JUMP) { 
             fprintf(f, "%d\n", inst_to_target[atoi(iter->quad->res)]);
         }
+        // conditional jump
         else if(iter->quad->op < 6) {
             fprintf(f, "%s %s %d\n", iter->quad->arg1, iter->quad->arg2, inst_to_target[atoi(iter->quad->res)]);
         }
-        else if(iter->quad->op == LDI || iter->quad->op == LD) { // load type code
+        // load immediate or load type
+        else if(iter->quad->op == LDI || iter->quad->op == LD) { 
             fprintf(f, "%s %s\n", iter->quad->res, iter->quad->arg1);
         }
-        else if(iter->quad->op == ST) { // store type code
+        // store type
+        else if(iter->quad->op == ST) {
             fprintf(f, "%s %s\n", iter->quad->arg1, iter->quad->res);
         }
-        else { // arithmetic type code
+        // arithmetic type
+        else {
             fprintf(f, "%s %s %s\n", iter->quad->res, iter->quad->arg1, iter->quad->arg2);
         } 
         iter = iter->next;

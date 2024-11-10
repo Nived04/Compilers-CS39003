@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_REG 5
+#define MAX_REG 2
 #define EQUATE 11
 #define GOTO 10
 #define JUMP 6
@@ -17,7 +17,7 @@ void yyerror(char *);
 extern int yylineno;
 extern char* yytext;
 
-int temp_gen_count = 0, instruction_count = 0, target_inst_count = 0;
+int offset = 0, temp_gen_count = 0, instruction_count = 0, target_inst_count = 0;
 int block_begin[1000]; // assuming at most 1000 instructions can be given
 int block_leaders[1000];
 int inst_to_target[1000];
@@ -30,7 +30,6 @@ typedef struct _SymbolTable {
 	char* name;
     int offset;
 	int reg_locs; 
-	int mem_locs;
 	int isInSync;
 	int isLive;
 	struct _SymbolTable* next;
@@ -201,11 +200,11 @@ SymbolTable* addIDtoST(char* id) {
     SymbolTable* new_node = (SymbolTable*)malloc(sizeof(SymbolTable));
     new_node->name = strdup(id); 
 	new_node->reg_locs = -1;
-	new_node->mem_locs = -1;
+	new_node->offset = offset;
 	new_node->isInSync = 1;
 	new_node->isLive = 1;
     new_node->next = NULL;
-
+	offset += 4;
     // If the head is NULL, this is the first node
     if (ST_Head == NULL) {
         ST_Head = new_node;
