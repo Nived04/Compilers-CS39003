@@ -234,18 +234,23 @@ void setID(char* id, char* rid) {
     SymbolTable* left_ID = findOrAddID(id);
 }
 
+quadruple* createQuad(int inst_no, int op, char* arg1, char* arg2, char* res) {
+    quadruple* new_quad = (quadruple*)malloc(sizeof(quadruple));
+    new_quad->inst_no = inst_no;
+    new_quad->op = op;
+    new_quad->arg1 = (arg1 == NULL) ? NULL : strdup(arg1);
+    new_quad->arg2 = (arg2 == NULL) ? NULL : strdup(arg2);
+    new_quad->res = (res == NULL) ? NULL : strdup(res);
+
+    return new_quad;
+}
+
 void emit(int op, char* arg1, char* arg2, char* res, int flag) {
 	if(flag) {
 		instruction_count++;
 	}
 	quadTable* new_quad = (quadTable*)malloc(sizeof(quadTable));
-	new_quad->quad = (quadruple*)malloc(sizeof(quadruple));
-
-	new_quad->quad->inst_no = instruction_count;
-	new_quad->quad->op = op;
-	new_quad->quad->arg1 = (arg1 == NULL) ? NULL : strdup(arg1);
-	new_quad->quad->arg2 = (arg2 == NULL) ? NULL : strdup(arg2);
-	new_quad->quad->res = (res == NULL) ? NULL : strdup(res);
+	new_quad->quad = createQuad(instruction_count, op, arg1, arg2, res);
 
 	new_quad->next = NULL;
 
