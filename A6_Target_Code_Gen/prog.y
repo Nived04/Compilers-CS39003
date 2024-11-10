@@ -5,6 +5,12 @@
 #include <string.h>
 
 #define MAX_REG 5
+#define EQUATE 11
+#define GOTO 10
+#define JUMP 6
+#define LDI 7
+#define LD 8
+#define ST 9
 
 int yylex(void);
 void yyerror(char *);
@@ -14,8 +20,10 @@ extern char* yytext;
 int temp_gen_count = 0, instruction_count = 0, target_inst_count = 0;
 int block_begin[1000]; // assuming at most 1000 instructions can be given
 int block_leaders[1000];
-int target_leaders[1000];
 int inst_to_target[1000];
+char* relation_op[6] = {"==", "!=", "<", ">", "<=", ">="};
+char* relation_target[10] = {"JNE", "JEQ", "JGE", "JLE", "JGT", "JLT", "JMP", "LDI", "LD", "ST"};
+
 char t[5];
 
 typedef struct _SymbolTable {
@@ -30,7 +38,8 @@ typedef struct _SymbolTable {
 
 typedef struct quadruple {
 	int inst_no;
-	char *op, *arg1, *arg2, *res;
+	int op;
+	char *arg1, *arg2, *res;
 }quadruple;
 
 typedef struct quadTable {
@@ -65,7 +74,7 @@ SymbolTable* findOrAddID(char*);
 
 void print_IntCode();
 
-void emit(char*, char*, char*, char*, int);
+void emit(int, char*, char*, char*, int);
 
 void backpatch(int, int); 
 
@@ -73,14 +82,14 @@ void backpatch(int, int);
 
 %union {int num; char* text;}
 
-%token LP RP SET WHEN LOOP EQ NOT_EQ LT GT LE GE INVALID_TOKEN
-%token <num> PLUS MINUS MULT DIV MOD
+%token LP RP SET WHEN LOOP INVALID_TOKEN
+%token <num> PLUS MINUS MULT DIV MOD EQ NOT_EQ LT GT LE GE 
 %token <text> IDEN NUMB
 
 %start prog
 %type stmt asgn cond loop bool 
-%type <text> atom expr reln
-%type <num> oper M N
+%type <text> atom expr 
+%type <num> oper M N reln
 
 %%
 
@@ -103,7 +112,7 @@ asgn:
 	  LP SET IDEN atom RP			
 	  { 
 		setID($3, $4); 
-		emit("=", $4, NULL, $3, 1); 
+		emit(EQUATE, $4, NULL, $3, 1); 
 	  }
 	;
 
@@ -116,15 +125,15 @@ loop:
 	;
 
 M:	
-	  { $$=instruction_count; emit("goto", NULL, NULL, NULL, 0); block_begin[instruction_count+1] = 1; }
+	  { $$=instruction_count; emit(GOTO, NULL, NULL, NULL, 0); block_begin[instruction_count+1] = 1; }
 	; 
 
 N: 
-	  { emit("goto", NULL, NULL, NULL, 1); $$=instruction_count; block_begin[instruction_count+1] = 1; }
+	  { emit(GOTO, NULL, NULL, NULL, 1); $$=instruction_count; block_begin[instruction_count+1] = 1; }
 	;
 
 expr: 
-	  LP oper atom atom RP		{ $$ = generateTemp(); addIDtoST($$); char s[1] = {(char)$2}; emit(s, $3, $4, $$, 1); }
+	  LP oper atom atom RP		{ $$ = generateTemp(); addIDtoST($$); emit($2, $3, $4, $$, 1); }
 	; 
 
 bool:
@@ -146,12 +155,12 @@ oper:
 	;
 
 reln:
-	  EQ		{ $$ = strdup("=="); }
-	| NOT_EQ	{ $$ = strdup("!="); }
-	| LT		{ $$ = strdup("<"); }
-	| GT		{ $$ = strdup(">"); }
-	| LE		{ $$ = strdup("<="); }
-	| GE		{ $$ = strdup(">="); }
+	  EQ		{ $$=0; }
+	| NOT_EQ	{ $$=1; }
+	| LT		{ $$=2; } 
+	| GT		{ $$=3; }
+	| LE		{ $$=4; }
+	| GE		{ $$=5; }
 	;
 
 
@@ -225,14 +234,15 @@ void setID(char* id, char* rid) {
     SymbolTable* left_ID = findOrAddID(id);
 }
 
-void emit(char* op, char* arg1, char* arg2, char* res, int flag) {
+void emit(int op, char* arg1, char* arg2, char* res, int flag) {
 	if(flag) {
 		instruction_count++;
 	}
 	quadTable* new_quad = (quadTable*)malloc(sizeof(quadTable));
 	new_quad->quad = (quadruple*)malloc(sizeof(quadruple));
+
 	new_quad->quad->inst_no = instruction_count;
-	new_quad->quad->op = (op == NULL) ? NULL : strdup(op);
+	new_quad->quad->op = op;
 	new_quad->quad->arg1 = (arg1 == NULL) ? NULL : strdup(arg1);
 	new_quad->quad->arg2 = (arg2 == NULL) ? NULL : strdup(arg2);
 	new_quad->quad->res = (res == NULL) ? NULL : strdup(res);
@@ -258,8 +268,7 @@ void backpatch(int from, int target) {
 	while(iter != NULL) {
 		char buff[10];
 		sprintf(buff, "%d", target);
-		if((iter->quad->op != NULL) && (strcmp(iter->quad->op, "goto") == 0) && (iter->quad->inst_no == from)) {
-			/* printf("HELLO\n"); */
+		if((iter->quad->op == GOTO) && (iter->quad->inst_no == from)) {
 			iter->quad->res = strdup(buff);
 			return;
 		}

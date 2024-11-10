@@ -4,22 +4,24 @@
 void print_QuadTable(quadTable** head) {
     quadTable* iter = *head;
     while(iter != NULL) {
-        printf("%d: %s %s %s %s\n", iter->quad->inst_no, iter->quad->op, iter->quad->arg1, iter->quad->arg2, iter->quad->res);
+        printf("%d: %d %s %s %s\n", iter->quad->inst_no, iter->quad->op, iter->quad->arg1, iter->quad->arg2, iter->quad->res);
         iter = iter->next;
     }
 }
 
-void emitTC(char* op, char* arg1, char* arg2, char* res) {
+void emitTC(int op, char* arg1, char* arg2, char* res) {
     target_inst_count++;
 
     quadTable* new_quad = (quadTable*)malloc(sizeof(quadTable));
     new_quad->quad = (quadruple*)malloc(sizeof(quadruple));
 
     new_quad->quad->inst_no = target_inst_count;
-    new_quad->quad->op = (op == NULL) ? NULL : strdup(op);
+    new_quad->quad->op = op;
     new_quad->quad->arg1 = (arg1 == NULL) ? NULL : strdup(arg1);
     new_quad->quad->arg2 = (arg2 == NULL) ? NULL : strdup(arg2);
     new_quad->quad->res = (res == NULL) ? NULL : strdup(res);
+
+    new_quad->next = NULL;
 
     if(T_Head == NULL) {
         T_Head = new_quad;
@@ -35,73 +37,80 @@ void emitTC(char* op, char* arg1, char* arg2, char* res) {
 
 void print_IntCode() {
 	quadTable* iter = Q_Head;
-	int inst = 0;
-	int block_count = 1;
+	int inst = 0, block_count = 1;
+
 	block_leaders[block_count] = 1;
-    printf("Block %d\n", block_count);
-    block_count++;
+
+    printf("Block %d\n", block_count++);
+
 	while(iter != NULL) {
 		inst++;
+
 		if(block_begin[inst] == 1) {
 			block_leaders[block_count] = inst;
-            printf("\nBlock %d\n", block_count);
-            block_count++;
+            printf("\nBlock %d\n", block_count++);
 		}
+
 		printf("\t%d\t: ", inst);
+
 		if( strcmp(iter->quad->res, "iffalse") == 0) {
-			printf("%s (%s %s %s) ", iter->quad->res, iter->quad->arg1, iter->quad->op, iter->quad->arg2);
+			printf("%s (%s %s %s) ", iter->quad->res, iter->quad->arg1, relation_op[iter->quad->op], iter->quad->arg2);
 			iter = iter->next;
 			printf("goto %s\n", iter->quad->res);
 		}
-		else if( strcmp(iter->quad->op, "goto") == 0) {
-			printf("%s %s\n", iter->quad->op, iter->quad->res);
+		else if(iter->quad->op == GOTO) {
+			printf("%s %s\n", "goto", iter->quad->res);
 		}
 		else {
 			if(iter->quad->arg2 == NULL) {
 				printf("%s = %s\n", iter->quad->res, iter->quad->arg1);
 			}
 			else {
-				printf("%s = %s %s %s\n", iter->quad->res, iter->quad->arg1, iter->quad->op, iter->quad->arg2);
+				printf("%s = %s %c %s\n", iter->quad->res, iter->quad->arg1, (char)iter->quad->op, iter->quad->arg2);
 			}
 		}
+
 		iter = iter->next;
 	}
 }
 
-name_list* freeRegDesc(name_list* n, int regno) {
-    if(n == NULL) return NULL; 
-    SymbolTable* sym = findID(n->var_name);
-    sym->reg_locs = -1;
-    if(sym->isInSync == 0) {
-        if(sym->name[0] != '$') {
-            char temp[20];
-            sprintf(temp, "R%d", regno+1);
-            emitTC("ST", n->var_name, NULL, temp);
-        }
-        sym->isInSync = 1;
-    }
-    freeRegDesc(n->next, regno);
-    free(n);
-}
+void freeRegDesc(int regno) {
+    name_list* n = RegBank[regno].reg_descriptor;
+    name_list* temp = n;
 
-void freeReg(int regno) {
-    RegBank[regno].score = 0;
-    RegBank[regno].reg_descriptor = freeRegDesc(RegBank[regno].reg_descriptor, regno);
+    while(n != NULL) {
+        SymbolTable* sym = findID(n->var_name); 
+        sym->reg_locs = -1;
+        if(sym->isInSync == 0) {
+            if(sym->name[0] != '$') {
+                char temp[20];
+                sprintf(temp, "R%d", regno+1);
+                emitTC(ST, n->var_name, NULL, temp);
+            }
+            sym->isInSync = 1;
+        }
+        temp = n;
+        n = n->next;
+        free(temp);
+    }
 }
 
 void freeRegisters() {
     for(int i=0; i<MAX_REG; i++) {
-        freeReg(i);
+        RegBank[i].score = 0;
+        freeRegDesc(i);
+        RegBank[i].reg_descriptor = NULL;
     }
 }
 
-void addDescriptor(reg* r, char* arg) {
+void addDescriptor(int regno, char* arg) {
     name_list* new_name = (name_list*)malloc(sizeof(name_list));
     new_name->var_name = strdup(arg);
 
-    name_list* temp = r->reg_descriptor;
+    name_list* temp = RegBank[regno].reg_descriptor;
+
     if(temp == NULL) {
-        r->reg_descriptor = new_name;
+        RegBank[regno].reg_descriptor = new_name;
         return;
     }
     while(temp->next != NULL) {
@@ -110,13 +119,14 @@ void addDescriptor(reg* r, char* arg) {
     temp->next = new_name;
 }
 
-void removeDescriptor(reg* r, char* arg) {
-    name_list* temp = r->reg_descriptor;
+void removeDescriptor(int regno, char* arg) {
+    name_list* temp = RegBank[regno].reg_descriptor;
     name_list* prev = NULL;
+
     while(temp != NULL) {
         if(strcmp(temp->var_name, arg) == 0) {
             if(prev == NULL) {
-                r->reg_descriptor = temp->next;
+                RegBank[regno].reg_descriptor = temp->next;
             }
             else {
                 prev->next = temp->next;
@@ -130,22 +140,23 @@ void removeDescriptor(reg* r, char* arg) {
 }
 
 void issueLoad(SymbolTable* s, int reg, int isLHS) {
-    freeReg(reg);
-    addDescriptor(&RegBank[reg], s->name);
+    // freeing the register before loading
+    RegBank[reg].score = 0;
+    freeRegDesc(reg);
+    RegBank[reg].reg_descriptor = NULL;
+
+    addDescriptor(reg, s->name);
     RegBank[reg].score = 1;
     s->reg_locs = reg;
     if((isLHS == 0) && (s->name[0] != '$')) {
         char temp[20];
         sprintf(temp, "R%d", reg+1);  
-        emitTC("LD", s->name, NULL, temp);
+        emitTC(LD, s->name, NULL, temp);
     }
 }
 
 int isDigit(char c) {
-    if(c >= '0' && c <= '9') {
-        return 1;
-    }
-    return 0;
+    return (c >= '0' && c <= '9') ? 1 : 0;
 }
 
 int getReg(char* arg, int isLHS) {
@@ -230,14 +241,16 @@ int getReg(char* arg, int isLHS) {
 void convertToTargetCode() {
     quadTable* iter = Q_Head;
     int inst  = 1;
+
     while(iter != NULL) {
         if(block_begin[inst] == 1) {
             freeRegisters();
             inst_to_target[inst] = target_inst_count + 1;
         }
-        if(strcmp(iter->quad->op, "goto") == 0) {
+
+        if(iter->quad->op == GOTO) {
             freeRegisters();
-            emitTC("JUMP", NULL, NULL, iter->quad->res);
+            emitTC(JUMP, NULL, NULL, iter->quad->res);
         }
         else if(strcmp(iter->quad->res, "iffalse") == 0) {
             char tc_arg1[20], tc_arg2[20], tc_op[20];
@@ -268,54 +281,44 @@ void convertToTargetCode() {
                 sprintf(tc_arg2, "R%d", arg2_reg+1);
             }
 
-            if(strcmp(iter->quad->op, "==") == 0) {
-                strcpy(tc_op, "JNE");
-            }
-            else if(strcmp(iter->quad->op, "!=") == 0) {
-                strcpy(tc_op, "JEQ");
-            }
-            else if(strcmp(iter->quad->op, "<") == 0) {
-                strcpy(tc_op, "JGE");
-            }
-            else if(strcmp(iter->quad->op, ">") == 0) {
-                strcpy(tc_op, "JLE");
-            }
-            else if(strcmp(iter->quad->op, "<=") == 0) {
-                strcpy(tc_op, "JGT");
-            }
-            else if(strcmp(iter->quad->op, ">=") == 0) {
-                strcpy(tc_op, "JLT");
-            }
             freeRegisters();
-            emitTC(tc_op, tc_arg1, tc_arg2, iter->next->quad->res);
+
+            emitTC(iter->quad->op, tc_arg1, tc_arg2, iter->next->quad->res);
+
             iter = iter->next;
         }
-        else if(strcmp(iter->quad->op, "=") == 0){
+        else if(iter->quad->op == EQUATE){
             SymbolTable* sym = findID(iter->quad->res);
 
             if(iter->quad->arg1[0] == '-' || iter->quad->arg1[0] == '+' || isDigit(iter->quad->arg1[0])) {
                 char temp[20];
                 int res_reg = getReg(iter->quad->res, 1);
+
                 sprintf(temp, "R%d", res_reg+1);
                 
-                freeReg(res_reg);
-                addDescriptor(&RegBank[res_reg], sym->name);
+                RegBank[res_reg].score = 0;
+                freeRegDesc(res_reg);
+                RegBank[res_reg].reg_descriptor = NULL;
+                
+                addDescriptor(res_reg, sym->name);
 
                 RegBank[res_reg].score = 1;
                 sym->reg_locs = res_reg ;
 
                 // printf("%p, %d\n", sym, sym->reg_locs);
 
-                emitTC("LDI", iter->quad->arg1, NULL, temp);
+                emitTC(LDI, iter->quad->arg1, NULL, temp);
             }
             else {
                 int arg1_reg = getReg(iter->quad->arg1, 0);
                 
                 if(sym->reg_locs != -1) {
-                    removeDescriptor(&RegBank[sym->reg_locs], sym->name);
+                    removeDescriptor(sym->reg_locs, sym->name);
                 }
                 sym->reg_locs = arg1_reg;
-                addDescriptor(&RegBank[arg1_reg], sym->name);
+
+                addDescriptor(arg1_reg, sym->name);
+
                 if(iter->quad->arg1[0] == '$')
                     findID(iter->quad->arg1)->isLive = 0;
             }
@@ -357,23 +360,7 @@ void convertToTargetCode() {
 
             sprintf(tc_res, "R%d", res_reg+1);
 
-            switch(iter->quad->op[0]) {
-                case '+':
-                    emitTC("ADD", tc_arg1, tc_arg2, tc_res);
-                    break;
-                case '-':
-                    emitTC("SUB", tc_arg1, tc_arg2, tc_res);
-                    break;
-                case '*':
-                    emitTC("MUL", tc_arg1, tc_arg2, tc_res);
-                    break;
-                case '/':
-                    emitTC("DIV", tc_arg1, tc_arg2, tc_res);
-                    break;
-                case '%':
-                    emitTC("REM", tc_arg1, tc_arg2, tc_res);
-                    break;
-            }
+            emitTC(iter->quad->op, tc_arg1, tc_arg2, tc_res);
         }
         iter = iter->next;
         inst++;
@@ -383,43 +370,61 @@ void convertToTargetCode() {
 
 void print_TargetCode() {
     quadTable* iter = T_Head;
-
     int target_inst = 1, block_count = 1;
 
     FILE *f = fopen("target_code.txt", "w");
-    fprintf(f, "Block %d\n", block_count);
-    block_count++;
+
+    fprintf(f, "Block %d\n", block_count++);
+
     while(iter) {
         if(inst_to_target[block_leaders[block_count]] == target_inst) {
-            fprintf(f, "\nBlock %d\n", block_count);
-            block_count++;
+            fprintf(f, "\nBlock %d\n", block_count++);
         }
-        fprintf(f, "\t%d\t: %s ", target_inst, iter->quad->op);
 
-        if(strcmp(iter->quad->op, "JUMP") == 0) {
-            fprintf(f, "%d\n", inst_to_target[atoi(iter->quad->res)]);
-        }
-        else if(iter->quad->op[0] == 'J') {
-            fprintf(f, "%s %s %d\n", iter->quad->arg1, iter->quad->arg2, inst_to_target[atoi(iter->quad->res)]);
-        }
-        else if(iter->quad->op[0] == 'L') {
-            fprintf(f, "%s %s\n", iter->quad->res, iter->quad->arg1);
-        }
-        else if(iter->quad->op[0] == 'S') {
-            fprintf(f, "%s %s\n", iter->quad->arg1, iter->quad->res);
+        char* tc_op;
+        if(iter->quad->op < 10) {
+            tc_op = strdup(relation_target[iter->quad->op]);
         }
         else {
+            if(iter->quad->op == '+') 
+                tc_op = strdup("ADD");
+            else if(iter->quad->op == '-')
+                tc_op = strdup("SUB");
+            else if(iter->quad->op == '*')
+                tc_op = strdup("MUL");
+            else if(iter->quad->op == '/')
+                tc_op = strdup("DIV");
+            else if(iter->quad->op == '%')
+                tc_op = strdup("REM");
+        }
+
+        fprintf(f, "\t%d\t: %s ", target_inst, tc_op);
+
+        if(iter->quad->op == JUMP) { // jump type code
+            fprintf(f, "%d\n", inst_to_target[atoi(iter->quad->res)]);
+        }
+        else if(iter->quad->op < 6) {
+            fprintf(f, "%s %s %d\n", iter->quad->arg1, iter->quad->arg2, inst_to_target[atoi(iter->quad->res)]);
+        }
+        else if(iter->quad->op == LDI || iter->quad->op == LD) { // load type code
+            fprintf(f, "%s %s\n", iter->quad->res, iter->quad->arg1);
+        }
+        else if(iter->quad->op == ST) { // store type code
+            fprintf(f, "%s %s\n", iter->quad->arg1, iter->quad->res);
+        }
+        else { // arithmetic type code
             fprintf(f, "%s %s %s\n", iter->quad->res, iter->quad->arg1, iter->quad->arg2);
         } 
         iter = iter->next;
         target_inst++;
     }
+    fprintf(f, "\t%d\t: ", target_inst);
+    fclose(f);  
 }
 
 int main() {
     memset(block_begin, 0, 1000*sizeof(int));
     memset(block_leaders, 0, 1000*sizeof(int));
-    memset(target_leaders, 0, 1000*sizeof(int));
 
     if(yyparse()) {
         printf("Error\n");
@@ -429,12 +434,6 @@ int main() {
     printf("\n\t%d\t:", instruction_count);
 
     convertToTargetCode();
-
-    for(int i=1; i<=instruction_count; i++) {
-        if(block_leaders[i] == 1) {
-            target_leaders[inst_to_target[i]] = 1;
-        }
-    }
 
     print_TargetCode();
 }
