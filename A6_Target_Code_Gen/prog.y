@@ -4,13 +4,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_REG 2
 #define EQUATE 11
 #define GOTO 10
 #define JUMP 6
 #define LDI 7
 #define LD 8
 #define ST 9
+
+int MAX_REG;
 
 int yylex(void);
 void yyerror(char *);
@@ -56,26 +57,48 @@ typedef struct _register {
     name_list* reg_descriptor;
 }reg;
 
-reg RegBank[MAX_REG];
+reg* RegBank;
 
 SymbolTable* ST_Head = NULL;
 quadTable* Q_Head = NULL;
 quadTable* T_Head = NULL;
 
+int isDigit(char c) { return (c >= '0' && c <= '9') ? 1 : 0; }
+
 char* generateTemp();
-void setID(char*, char*);
 
 void printST();
 
 SymbolTable* findID(char*);
 SymbolTable* addIDtoST(char*);
 SymbolTable* findOrAddID(char*);
+void setID(char*, char*);
+
+quadruple* createQuad(int, int, char*, char*, char*);
+
+void emit(int, char*, char*, char*, int);
+void backpatch(int, int); 
 
 void print_IntCode();
 
-void emit(int, char*, char*, char*, int);
+void emitTC(int, char*, char*, char*);
 
-void backpatch(int, int); 
+void freeRegDesc(int);
+void freeRegisters();
+
+void addDescriptor(int, char*);
+void removeDescriptor(int, char*);
+
+void allocateReg(int, char*);
+void issueLoad(SymbolTable*, int , int);
+
+int getReg(char*, int, int, int);
+
+void kill_temp(char*, int);
+char* tc_arg_value(char*, char*, int, int);
+
+void convertToTargetCode();
+void print_TargetCode();
 
 %}
 
@@ -85,16 +108,11 @@ void backpatch(int, int);
 %token <num> PLUS MINUS MULT DIV MOD EQ NOT_EQ LT GT LE GE 
 %token <text> IDEN NUMB
 
-%start prog
 %type stmt asgn cond loop bool 
 %type <text> atom expr 
 %type <num> oper M N reln
 
 %%
-
-prog: 	
-	  list		{ instruction_count++; }
-	;
 
 list:
       stmt		{}
@@ -166,7 +184,7 @@ reln:
 %%
 
 void yyerror(char* message) {
-    printf("*** Error on line: %d", yylineno);
+    printf("*** Error on line: %d\n", yylineno);
 }
 
 char* generateTemp() {
